@@ -1,0 +1,18 @@
+# Impala Node Collector Configuration
+
+# Impala 节点配置
+# 如果不指定 impala_host，程序会自动获取 eth0 网卡的 IP 地址
+# impala_host: "192.168.1.100"  # 可以手动指定 IP 地址
+impala_port: 25000
+
+# Prometheus 指标服务端口
+metrics_port: 9356
+
+# 采集间隔（秒）
+collect_interval: 30
+
+# 日志级别
+log_level: "INFO"
+
+# 超时设置
+timeout: 10
