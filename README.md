@@ -7,52 +7,67 @@ Apache Impala 集群监控解决方案，提供节点级别的指标采集和 Gr
 - 🔍 **自动指标采集**：采集 Impala 节点的内存、CPU、查询等关键指标
 - 📊 **Prometheus 集成**：标准 Prometheus 指标格式导出
 - 📈 **Grafana 仪表板**：预配置的监控面板
-- 🚀 **自动部署**：一键部署脚本
+- 🚀 **自动部署**：Ansible 一键部署
 - 🔧 **智能配置**：自动获取网卡 IP 地址
-
-## 快速开始
-
-### 1. 克隆仓库
-```bash
-git clone https://github.com/你的用户名/impala-monitor.git
-cd impala-monitor
-```
-
-### 2. 安装依赖
-```bash
-pip3 install -r requirements.txt
-```
-
-### 3. 运行采集器
-```bash
-# 自动获取 IP 并启动
-python3 impala_node_collector.py
-
-# 或者一键部署为系统服务
-sudo ./deploy_node_collector.sh install
-```
-
-### 4. 验证运行
-```bash
-# 检查指标
-curl http://localhost:9356/metrics
-
-# 导入 Grafana 仪表板
-# 使用 grafana-impala-node-dashboard.json
-```
 
 ## 项目结构
 
 ```
 impala-monitor/
-├── README.md                           # 项目说明
-├── impala_node_collector.py           # 主采集器程序
-├── node_config.yaml                   # 配置文件
-├── requirements.txt                   # Python 依赖
-├── deploy_node_collector.sh           # 部署脚本
-├── get_ip.py                          # IP 获取测试工具
-├── grafana-impala-node-dashboard.json # Grafana 仪表板
-└── README_NODE_COLLECTOR.md           # 详细文档
+├── README.md                    # 项目总览
+├── LICENSE                      # 许可证
+├── .gitignore                   # Git 忽略文件
+├── monitor/                     # 监控模块
+│   ├── src/                     # 源代码
+│   │   └── impala_node_collector.py
+│   ├── config/                  # 配置文件
+│   │   └── node_config.yaml
+│   ├── scripts/                 # 工具脚本
+│   │   ├── deploy_node_collector.sh
+│   │   └── get_ip.py
+│   ├── docs/                    # 文档
+│   │   └── README_NODE_COLLECTOR.md
+│   ├── requirements.txt         # Python 依赖
+│   └── grafana-impala-node-dashboard.json
+├── ansible/                     # Ansible 部署模块
+│   ├── playbooks/              # Playbook 文件
+│   │   └── deploy-impala-monitor.yml
+│   ├── inventory/              # 主机清单
+│   │   └── inventory.ini
+│   └── scripts/                # 部署脚本
+│       └── deploy.sh
+└── test_data/                  # 测试数据
+    ├── metrics.json
+    └── query.json
+```
+
+## 快速开始
+
+### 方式一：手动部署
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/zhaojinwei1993/impala-monitor.git
+cd impala-monitor
+
+# 2. 安装依赖
+pip3 install -r monitor/requirements.txt
+
+# 3. 运行采集器
+python3 monitor/src/impala_node_collector.py
+
+# 4. 验证运行
+curl http://localhost:9356/metrics
+```
+
+### 方式二：Ansible 自动部署
+
+```bash
+# 1. 配置主机清单
+vim ansible/inventory/inventory.ini
+
+# 2. 执行自动部署
+cd ansible/scripts && ./deploy.sh
 ```
 
 ## 监控指标

@@ -1,0 +1,82 @@
+---
+- name: Deploy Impala Monitor
+  hosts: impala_nodes
+  become: yes
+  vars:
+    monitor_dir: /opt/impala-monitor
+    service_port: 9356
+
+  tasks:
+    - name: Install required packages
+      package:
+        name:
+          - python3
+          - python3-pip
+          - git
+        state: present
+
+    - name: Clone impala-monitor repository
+      git:
+        repo: https://github.com/zhaojinwei1993/impala-monitor.git
+        dest: "{{ monitor_dir }}"
+        force: yes
+
+    - name: Install Python dependencies
+      pip:
+        requirements: "{{ monitor_dir }}/monitor/requirements.txt"
+        executable: pip3
+
+    - name: Create systemd service file
+      copy:
+        content: |
+          [Unit]
+          Description=Impala Node Monitor
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=root
+          WorkingDirectory={{ monitor_dir }}/monitor
+          ExecStart=/usr/bin/python3 {{ monitor_dir }}/monitor/src/impala_node_collector.py
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/impala-monitor.service
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start impala-monitor service
+      systemd:
+        name: impala-monitor
+        enabled: yes
+        state: started
+
+    - name: Check service status
+      systemd:
+        name: impala-monitor
+      register: service_status
+
+    - name: Display service status
+      debug:
+        msg: "Impala Monitor service is {{ service_status.status.ActiveState }}"
+
+    - name: Wait for service to be ready
+      wait_for:
+        port: "{{ service_port }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        timeout: 30
+
+    - name: Test metrics endpoint
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:{{ service_port }}/metrics"
+        method: GET
+      register: metrics_test
+
+    - name: Display deployment result
+      debug:
+        msg: "Impala Monitor deployed successfully on {{ ansible_default_ipv4.address }}:{{ service_port }}"
