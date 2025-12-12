@@ -12,18 +12,23 @@
         name:
           - python3
           - python3-pip
-          - git
         state: present
 
-    - name: Clone impala-monitor repository
-      git:
-        repo: https://github.com/zhaojinwei1993/impala-monitor.git
-        dest: "{{ monitor_dir }}"
-        force: yes
+    - name: Create monitor directory
+      file:
+        path: "{{ monitor_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy monitor source files
+      copy:
+        src: "../../monitor/"
+        dest: "{{ monitor_dir }}/"
+        mode: '0755'
 
     - name: Install Python dependencies
       pip:
-        requirements: "{{ monitor_dir }}/monitor/requirements.txt"
+        requirements: "{{ monitor_dir }}/requirements.txt"
         executable: pip3
 
     - name: Create systemd service file
@@ -36,8 +41,8 @@
           [Service]
           Type=simple
           User=root
-          WorkingDirectory={{ monitor_dir }}/monitor
-          ExecStart=/usr/bin/python3 {{ monitor_dir }}/monitor/src/impala_node_collector.py
+          WorkingDirectory={{ monitor_dir }}
+          ExecStart=/usr/bin/python3 {{ monitor_dir }}/src/impala_node_collector.py
           Restart=always
           RestartSec=10
 
