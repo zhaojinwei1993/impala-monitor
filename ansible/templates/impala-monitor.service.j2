@@ -1,0 +1,22 @@
+[Unit]
+Description=Impala Monitor
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory={{ monitor_dir }}/src
+ExecStart=/usr/bin/python3 {{ monitor_dir }}/src/impala_monitor.py --config {{ monitor_dir }}/config/node_config.yaml
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{ service_name }}
+
+# 环境变量
+Environment=PYTHONPATH={{ monitor_dir }}/src
+
+[Install]
+WantedBy=multi-user.target

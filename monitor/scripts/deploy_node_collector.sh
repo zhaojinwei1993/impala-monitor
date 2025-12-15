@@ -1,17 +1,15 @@
 #!/bin/bash
-
-# Impala Node Collector 部署脚本
+"""
+Impala Node Collector 部署脚本
+使用root用户部署
+"""
 
 set -e
 
-# 配置变量
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COLLECTOR_NAME="impala_node_collector"
-SERVICE_NAME="impala-node-collector"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 INSTALL_DIR="/opt/impala-monitor"
-CONFIG_DIR="/etc/impala-monitor"
-LOG_DIR="/var/log/impala-monitor"
-USER="impala-monitor"
+SERVICE_NAME="impala-monitor"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -31,7 +29,6 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# 检查是否为 root 用户
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root"
@@ -39,160 +36,263 @@ check_root() {
     fi
 }
 
-# 创建用户
-create_user() {
-    if ! id "$USER" &>/dev/null; then
-        log_info "Creating user $USER"
-        useradd -r -s /bin/false -d /nonexistent "$USER"
-    else
-        log_info "User $USER already exists"
-    fi
-}
-
-# 创建目录
-create_directories() {
-    log_info "Creating directories"
-    mkdir -p "$INSTALL_DIR"
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$LOG_DIR"
-    
-    chown -R "$USER:$USER" "$INSTALL_DIR"
-    chown -R "$USER:$USER" "$CONFIG_DIR"
-    chown -R "$USER:$USER" "$LOG_DIR"
-}
-
-# 安装 Python 依赖
 install_dependencies() {
-    log_info "Installing Python dependencies"
+    log_info "Installing dependencies..."
     
-    # 检查 Python 3
-    if ! command -v python3 &> /dev/null; then
-        log_error "Python 3 is required but not installed"
+    # 检测操作系统
+    if command -v yum &> /dev/null; then
+        # CentOS/RHEL
+        yum update -y
+        yum install -y python3 python3-pip
+    elif command -v apt-get &> /dev/null; then
+        # Ubuntu/Debian
+        apt-get update
+        apt-get install -y python3 python3-pip
+    else
+        log_error "Unsupported operating system"
         exit 1
     fi
     
-    # 安装 pip 依赖
-    pip3 install prometheus_client requests pyyaml
+    # 安装 Python 依赖
+    pip3 install -r "$PROJECT_ROOT/monitor/requirements.txt"
 }
 
-# 复制文件
-copy_files() {
-    log_info "Copying files"
+install_files() {
+    log_info "Installing files to $INSTALL_DIR..."
     
-    # 复制主程序
-    cp "$SCRIPT_DIR/${COLLECTOR_NAME}.py" "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/${COLLECTOR_NAME}.py"
+    # 创建安装目录
+    mkdir -p "$INSTALL_DIR"/{src,config,logs}
+    
+    # 复制源代码
+    cp "$PROJECT_ROOT/monitor/src/impala_exporter.py" "$INSTALL_DIR/src/"
+    cp "$PROJECT_ROOT/monitor/src/impala_monitor.py" "$INSTALL_DIR/src/"
     
     # 复制配置文件
-    if [[ ! -f "$CONFIG_DIR/node_config.yaml" ]]; then
-        cp "$SCRIPT_DIR/node_config.yaml" "$CONFIG_DIR/"
-    else
-        log_warn "Configuration file already exists, skipping"
-    fi
+    cp "$PROJECT_ROOT/monitor/config/node_config.yaml" "$INSTALL_DIR/config/"
     
-    chown -R "$USER:$USER" "$INSTALL_DIR"
-    chown -R "$USER:$USER" "$CONFIG_DIR"
+    # 设置权限
+    chmod +x "$INSTALL_DIR/src/impala_monitor.py"
 }
 
-# 创建 systemd 服务
-create_service() {
-    log_info "Creating systemd service"
+create_systemd_service() {
+    log_info "Creating systemd service..."
     
-    cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
+    cat > "/etc/systemd/system/$SERVICE_NAME.service" << EOF
 [Unit]
-Description=Impala Node Metrics Collector
+Description=Impala Monitor
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
-User=$USER
-Group=$USER
-WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/bin/python3 $INSTALL_DIR/${COLLECTOR_NAME}.py --config $CONFIG_DIR/node_config.yaml
+User=root
+Group=root
+WorkingDirectory=$INSTALL_DIR/src
+ExecStart=/usr/bin/python3 $INSTALL_DIR/src/impala_monitor.py --config $INSTALL_DIR/config/node_config.yaml
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=$SERVICE_NAME
 
-# 资源限制
-LimitNOFILE=65536
-LimitNPROC=4096
+# 环境变量
+Environment=PYTHONPATH=$INSTALL_DIR/src
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
+    log_info "Systemd service created"
 }
 
-# 启动服务
+configure_firewall() {
+    log_info "Configuring firewall..."
+    
+    # 获取配置的端口
+    METRICS_PORT=$(grep "metrics_port:" "$INSTALL_DIR/config/node_config.yaml" | awk '{print $2}')
+    METRICS_PORT=${METRICS_PORT:-9356}
+    
+    if command -v firewall-cmd &> /dev/null; then
+        # CentOS/RHEL with firewalld
+        firewall-cmd --permanent --add-port="$METRICS_PORT/tcp"
+        firewall-cmd --reload
+        log_info "Firewall configured for port $METRICS_PORT"
+    elif command -v ufw &> /dev/null; then
+        # Ubuntu with ufw
+        ufw allow "$METRICS_PORT/tcp"
+        log_info "UFW configured for port $METRICS_PORT"
+    else
+        log_warn "No firewall management tool found, please manually open port $METRICS_PORT"
+    fi
+}
+
 start_service() {
-    log_info "Starting service"
+    log_info "Starting $SERVICE_NAME service..."
+    
     systemctl enable "$SERVICE_NAME"
     systemctl start "$SERVICE_NAME"
     
-    # 检查服务状态
-    sleep 3
+    # 等待服务启动
+    sleep 5
+    
     if systemctl is-active --quiet "$SERVICE_NAME"; then
         log_info "Service started successfully"
+        
+        # 显示状态
         systemctl status "$SERVICE_NAME" --no-pager -l
+        
+        # 测试指标端点
+        METRICS_PORT=$(grep "metrics_port:" "$INSTALL_DIR/config/node_config.yaml" | awk '{print $2}')
+        METRICS_PORT=${METRICS_PORT:-9356}
+        
+        log_info "Testing metrics endpoint..."
+        if curl -s "http://localhost:$METRICS_PORT/metrics" > /dev/null; then
+            log_info "✓ Metrics endpoint is accessible at http://localhost:$METRICS_PORT/metrics"
+        else
+            log_warn "✗ Metrics endpoint test failed"
+        fi
     else
-        log_error "Service failed to start"
+        log_error "Failed to start service"
         systemctl status "$SERVICE_NAME" --no-pager -l
         exit 1
     fi
 }
 
-# 显示使用信息
-show_usage() {
-    log_info "Deployment completed successfully!"
-    echo
-    echo "Service management commands:"
-    echo "  Start:   systemctl start $SERVICE_NAME"
-    echo "  Stop:    systemctl stop $SERVICE_NAME"
-    echo "  Restart: systemctl restart $SERVICE_NAME"
-    echo "  Status:  systemctl status $SERVICE_NAME"
-    echo "  Logs:    journalctl -u $SERVICE_NAME -f"
-    echo
-    echo "Configuration file: $CONFIG_DIR/node_config.yaml"
-    echo "Log directory: $LOG_DIR"
-    echo
-    echo "Metrics will be available at: http://localhost:9356/metrics"
-}
-
-# 主函数
-main() {
-    log_info "Starting Impala Node Collector deployment"
+stop_service() {
+    log_info "Stopping $SERVICE_NAME service..."
     
-    check_root
-    create_user
-    create_directories
-    install_dependencies
-    copy_files
-    create_service
-    start_service
-    show_usage
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        systemctl stop "$SERVICE_NAME"
+        log_info "Service stopped"
+    else
+        log_info "Service is not running"
+    fi
 }
 
-# 处理命令行参数
-case "${1:-install}" in
+uninstall() {
+    log_info "Uninstalling Impala Monitor..."
+    
+    # 停止服务
+    stop_service
+    
+    # 禁用服务
+    systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+    
+    # 删除服务文件
+    rm -f "/etc/systemd/system/$SERVICE_NAME.service"
+    systemctl daemon-reload
+    
+    # 删除安装目录
+    rm -rf "$INSTALL_DIR"
+    
+    log_info "Uninstallation completed"
+}
+
+show_status() {
+    log_info "Service status:"
+    systemctl status "$SERVICE_NAME" --no-pager -l || true
+    
+    log_info "Recent logs:"
+    journalctl -u "$SERVICE_NAME" --no-pager -l -n 20 || true
+}
+
+show_help() {
+    echo "Usage: $0 {install|start|stop|restart|status|uninstall|test}"
+    echo ""
+    echo "Commands:"
+    echo "  install   - Install Impala Monitor"
+    echo "  start     - Start the service"
+    echo "  stop      - Stop the service"
+    echo "  restart   - Restart the service"
+    echo "  status    - Show service status and logs"
+    echo "  uninstall - Remove Impala Monitor"
+    echo "  test      - Test the installation"
+    echo ""
+}
+
+test_installation() {
+    log_info "Testing installation..."
+    
+    # 检查文件
+    if [[ -f "$INSTALL_DIR/src/impala_monitor.py" ]]; then
+        log_info "✓ Monitor script found"
+    else
+        log_error "✗ Monitor script not found"
+        return 1
+    fi
+    
+    # 检查配置
+    if [[ -f "$INSTALL_DIR/config/node_config.yaml" ]]; then
+        log_info "✓ Configuration file found"
+    else
+        log_error "✗ Configuration file not found"
+        return 1
+    fi
+    
+    # 检查服务
+    if systemctl is-enabled --quiet "$SERVICE_NAME"; then
+        log_info "✓ Service is enabled"
+    else
+        log_warn "✗ Service is not enabled"
+    fi
+    
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        log_info "✓ Service is running"
+    else
+        log_warn "✗ Service is not running"
+    fi
+    
+    # 测试 Python 脚本
+    log_info "Testing Python script..."
+    cd "$INSTALL_DIR/src"
+    if python3 -c "import impala_exporter, impala_monitor; print('✓ Python modules import successfully')"; then
+        log_info "✓ Python modules are working"
+    else
+        log_error "✗ Python modules have issues"
+        return 1
+    fi
+    
+    log_info "Installation test completed"
+}
+
+# 主逻辑
+case "${1:-}" in
     install)
-        main
+        check_root
+        install_dependencies
+        install_files
+        create_systemd_service
+        configure_firewall
+        start_service
+        log_info "Installation completed successfully!"
+        log_info "You can check the status with: $0 status"
+        ;;
+    start)
+        check_root
+        start_service
+        ;;
+    stop)
+        check_root
+        stop_service
+        ;;
+    restart)
+        check_root
+        stop_service
+        start_service
+        ;;
+    status)
+        show_status
         ;;
     uninstall)
-        log_info "Uninstalling Impala Node Collector"
-        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-        systemctl disable "$SERVICE_NAME" 2>/dev/null || true
-        rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
-        systemctl daemon-reload
-        rm -rf "$INSTALL_DIR"
-        log_warn "Configuration and logs preserved in $CONFIG_DIR and $LOG_DIR"
-        log_info "Uninstallation completed"
+        check_root
+        uninstall
+        ;;
+    test)
+        test_installation
         ;;
     *)
-        echo "Usage: $0 {install|uninstall}"
+        show_help
         exit 1
         ;;
 esac

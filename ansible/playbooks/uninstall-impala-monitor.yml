@@ -1,0 +1,157 @@
+---
+- name: Uninstall Impala Monitor from Multiple Nodes
+  hosts: impala_nodes
+  become: yes
+  gather_facts: yes
+  vars:
+    service_name: "impala-monitor"
+    install_dir: "/opt/impala-monitor"
+    
+  tasks:
+    - name: Display target hosts
+      debug:
+        msg: "Uninstalling Impala Monitor from {{ inventory_hostname }} ({{ ansible_default_ipv4.address }})"
+
+    - name: Check if service exists
+      stat:
+        path: "/etc/systemd/system/{{ service_name }}.service"
+      register: service_file
+
+    - name: Stop service if running
+      systemd:
+        name: "{{ service_name }}"
+        state: stopped
+      ignore_errors: yes
+      when: service_file.stat.exists
+
+    - name: Disable service
+      systemd:
+        name: "{{ service_name }}"
+        enabled: no
+      ignore_errors: yes
+      when: service_file.stat.exists
+
+    - name: Remove systemd service file
+      file:
+        path: "/etc/systemd/system/{{ service_name }}.service"
+        state: absent
+      when: service_file.stat.exists
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Check if install directory exists
+      stat:
+        path: "{{ install_dir }}"
+      register: install_dir_stat
+
+    - name: Backup configuration before removal (optional)
+      copy:
+        src: "{{ install_dir }}/config/"
+        dest: "/tmp/impala-monitor-config-backup-{{ ansible_date_time.epoch }}/"
+        remote_src: yes
+      when: install_dir_stat.stat.exists
+      ignore_errors: yes
+
+    - name: Remove installation directory
+      file:
+        path: "{{ install_dir }}"
+        state: absent
+      when: install_dir_stat.stat.exists
+
+    - name: Remove firewall rules (firewalld)
+      firewalld:
+        port: "{{ item }}/tcp"
+        permanent: yes
+        state: disabled
+        immediate: yes
+      loop:
+        - "9356"
+        - "9357"
+      ignore_errors: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Remove firewall rules (ufw)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+        delete: yes
+      loop:
+        - "9356"
+        - "9357"
+      ignore_errors: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Remove Python packages (optional)
+      pip:
+        name:
+          - prometheus-client
+          - requests
+          - pyyaml
+        state: absent
+      ignore_errors: yes
+      tags: remove_packages
+
+    - name: Clean up log files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/var/log/impala-monitor.log"
+      ignore_errors: yes
+
+    - name: Clean up temporary files
+      find:
+        paths: "/tmp"
+        patterns: "*impala-monitor*"
+        age: "1d"
+      register: temp_files
+
+    - name: Remove temporary files
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ temp_files.files }}"
+      ignore_errors: yes
+
+    - name: Verify uninstallation
+      block:
+        - name: Check if services are removed
+          command: systemctl list-unit-files --type=service
+          register: service_list
+          changed_when: false
+
+        - name: Verify no impala-monitor services
+          assert:
+            that:
+              - "'impala-monitor.service' not in service_list.stdout"
+            fail_msg: "Service was not properly removed"
+            success_msg: "Service successfully removed"
+
+        - name: Check if installation directory is removed
+          stat:
+            path: "{{ install_dir }}"
+          register: final_dir_check
+
+        - name: Verify directory removal
+          assert:
+            that:
+              - not final_dir_check.stat.exists
+            fail_msg: "Installation directory still exists"
+            success_msg: "Installation directory successfully removed"
+
+    - name: Display uninstallation summary
+      debug:
+        msg: |
+          Uninstallation completed on {{ inventory_hostname }}:
+          - Service stopped and removed: ✓
+          - Installation directory removed: ✓
+          - Firewall rules cleaned: ✓
+          - Configuration backed up to: /tmp/impala-monitor-config-backup-{{ ansible_date_time.epoch }}/
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes

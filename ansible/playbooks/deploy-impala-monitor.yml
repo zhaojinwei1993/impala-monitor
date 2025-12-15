@@ -2,29 +2,46 @@
 - name: Deploy Impala Monitor
   hosts: impala_nodes
   become: yes
+  gather_facts: yes
   vars:
     monitor_dir: /opt/impala-monitor
     service_port: 9356
+    service_name: impala-monitor
 
   tasks:
+    - name: Display target host information
+      debug:
+        msg: "Deploying to {{ inventory_hostname }} ({{ ansible_default_ipv4.address }})"
+
     - name: Install required packages
       package:
         name:
           - python3
           - python3-pip
+          - curl
         state: present
 
-    - name: Create monitor directory
+    - name: Create monitor directory structure
       file:
-        path: "{{ monitor_dir }}"
+        path: "{{ item }}"
         state: directory
         mode: '0755'
+      loop:
+        - "{{ monitor_dir }}"
+        - "{{ monitor_dir }}/src"
+        - "{{ monitor_dir }}/config"
+        - "{{ monitor_dir }}/logs"
 
     - name: Copy monitor source files
       copy:
-        src: "../../monitor/"
-        dest: "{{ monitor_dir }}/"
-        mode: '0755'
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { src: "../../monitor/src/impala_exporter.py", dest: "{{ monitor_dir }}/src/", mode: "0644" }
+        - { src: "../../monitor/src/impala_monitor.py", dest: "{{ monitor_dir }}/src/", mode: "0755" }
+        - { src: "../../monitor/config/node_config.yaml", dest: "{{ monitor_dir }}/config/", mode: "0644" }
+        - { src: "../../monitor/requirements.txt", dest: "{{ monitor_dir }}/", mode: "0644" }
 
     - name: Install Python dependencies
       pip:
@@ -32,56 +49,73 @@
         executable: pip3
 
     - name: Create systemd service file
-      copy:
-        content: |
-          [Unit]
-          Description=Impala Node Monitor
-          After=network.target
-
-          [Service]
-          Type=simple
-          User=root
-          WorkingDirectory={{ monitor_dir }}
-          ExecStart=/usr/bin/python3 {{ monitor_dir }}/src/impala_node_collector.py
-          Restart=always
-          RestartSec=10
-
-          [Install]
-          WantedBy=multi-user.target
-        dest: /etc/systemd/system/impala-monitor.service
+      template:
+        src: ../templates/impala-monitor.service.j2
+        dest: "/etc/systemd/system/{{ service_name }}.service"
         mode: '0644'
+      notify: reload systemd
 
-    - name: Reload systemd daemon
-      systemd:
-        daemon_reload: yes
+    - name: Configure firewall (firewalld)
+      firewalld:
+        port: "{{ service_port }}/tcp"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      ignore_errors: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Configure firewall (ufw)
+      ufw:
+        rule: allow
+        port: "{{ service_port }}"
+        proto: tcp
+      ignore_errors: yes
+      when: ansible_os_family == "Debian"
 
     - name: Enable and start impala-monitor service
       systemd:
-        name: impala-monitor
+        name: "{{ service_name }}"
         enabled: yes
         state: started
-
-    - name: Check service status
-      systemd:
-        name: impala-monitor
-      register: service_status
-
-    - name: Display service status
-      debug:
-        msg: "Impala Monitor service is {{ service_status.status.ActiveState }}"
+        daemon_reload: yes
 
     - name: Wait for service to be ready
       wait_for:
         port: "{{ service_port }}"
         host: "{{ ansible_default_ipv4.address }}"
-        timeout: 30
+        timeout: 60
+        delay: 5
+
+    - name: Check service status
+      systemd:
+        name: "{{ service_name }}"
+      register: service_status
 
     - name: Test metrics endpoint
       uri:
         url: "http://{{ ansible_default_ipv4.address }}:{{ service_port }}/metrics"
         method: GET
+        timeout: 10
       register: metrics_test
+      retries: 3
+      delay: 5
+
+    - name: Verify host labels in metrics
+      shell: |
+        curl -s "http://{{ ansible_default_ipv4.address }}:{{ service_port }}/metrics" | grep -E "(host_ip|hostname)" | head -5
+      register: host_labels_check
+      ignore_errors: yes
 
     - name: Display deployment result
       debug:
-        msg: "Impala Monitor deployed successfully on {{ ansible_default_ipv4.address }}:{{ service_port }}"
+        msg: |
+          Impala Monitor deployed successfully:
+          - Host: {{ inventory_hostname }} ({{ ansible_default_ipv4.address }})
+          - Service: {{ service_status.status.ActiveState }}
+          - Metrics: http://{{ ansible_default_ipv4.address }}:{{ service_port }}/metrics
+          - Host labels: {{ 'Found' if host_labels_check.stdout else 'Not found' }}
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes

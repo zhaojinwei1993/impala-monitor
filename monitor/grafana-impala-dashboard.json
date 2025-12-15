@@ -1,0 +1,297 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Impala Cluster Monitor V2",
+    "tags": ["impala", "monitoring"],
+    "style": "dark",
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "host",
+          "type": "query",
+          "label": "Host",
+          "query": "label_values(impala_node_info, hostname)",
+          "refresh": 1,
+          "includeAll": true,
+          "allValue": ".*",
+          "multi": true,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        },
+        {
+          "name": "host_ip",
+          "type": "query",
+          "label": "Host IP",
+          "query": "label_values(impala_node_info, host_ip)",
+          "refresh": 1,
+          "includeAll": true,
+          "allValue": ".*",
+          "multi": true,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Cluster Overview",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "count(impala_node_info{hostname=~\"$host\", host_ip=~\"$host_ip\"})",
+            "legendFormat": "Active Nodes"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "JVM Heap Memory Usage by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "impala_jvm_heap_used_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Used"
+          },
+          {
+            "expr": "impala_jvm_heap_max_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Max"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "bytes"
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Memory Usage by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "impala_memory_rss_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - RSS"
+          },
+          {
+            "expr": "impala_memory_total_used_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Total Used"
+          },
+          {
+            "expr": "impala_tcmalloc_in_use_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - TCMalloc"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "bytes"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Query States (Current) by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "impala_queries_running_current{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Running"
+          },
+          {
+            "expr": "impala_queries_waiting_current{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Waiting"
+          },
+          {
+            "expr": "impala_queries_executing_current{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Executing"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "System Resources by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "impala_threads_running{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Threads"
+          },
+          {
+            "expr": "impala_connections_hiveserver2{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - HS2 Connections"
+          },
+          {
+            "expr": "impala_connections_beeswax{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Beeswax Connections"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Buffer Pool Usage by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "impala_buffer_pool_reserved_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Reserved"
+          },
+          {
+            "expr": "impala_buffer_pool_allocated_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Allocated"
+          },
+          {
+            "expr": "impala_buffer_pool_limit_bytes{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Limit"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "bytes"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "I/O Throughput by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+        "targets": [
+          {
+            "expr": "rate(impala_bytes_read_total{hostname=~\"$host\", host_ip=~\"$host_ip\"}[5m])",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Read Rate"
+          },
+          {
+            "expr": "rate(impala_bytes_written_total{hostname=~\"$host\", host_ip=~\"$host_ip\"}[5m])",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - Write Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "Bps"
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Host Information Table",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "impala_node_info{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "Time": true,
+                "Value": true
+              },
+              "renameByName": {
+                "hostname": "Hostname",
+                "host_ip": "Host IP",
+                "impala_host": "Impala Host",
+                "impala_port": "Impala Port"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "left",
+              "displayMode": "list"
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "JVM Garbage Collection by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+        "targets": [
+          {
+            "expr": "rate(impala_jvm_gc_count_total{hostname=~\"$host\", host_ip=~\"$host_ip\"}[5m])",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - GC Rate"
+          },
+          {
+            "expr": "rate(impala_jvm_gc_time_seconds_total{hostname=~\"$host\", host_ip=~\"$host_ip\"}[5m])",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - GC Time Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Admission Control by Host",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+        "targets": [
+          {
+            "expr": "impala_admission_queued{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - {{pool}} Queued"
+          },
+          {
+            "expr": "impala_admission_running{hostname=~\"$host\", host_ip=~\"$host_ip\"}",
+            "legendFormat": "{{hostname}} ({{host_ip}}) - {{pool}} Running"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short"
+          }
+        }
+      }
+    ]
+  }
+}
