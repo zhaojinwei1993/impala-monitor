@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Impala Metrics Exporter
-基于 JMX 接口采集 Impala 指标，参考 Hadoop 监控项目结构
+基于 metrics 和 queries 接口采集 Impala 指标
 """
 
 import json
@@ -14,35 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 class ImpalaExporter:
-    """Impala 指标导出器，通过 JMX 接口获取指标"""
+    """Impala 指标导出器，通过 metrics 和 queries 接口获取指标"""
     
     def __init__(self, host: str, port: int = 25000):
         self.host = host
         self.port = port
-        self.jmx_url = f"http://{host}:{port}/jmx"
         self.metrics_url = f"http://{host}:{port}/metrics?json"
         self.queries_url = f"http://{host}:{port}/queries?json"
         self.session = requests.Session()
         self.session.timeout = 10
-        
-    def _get_jmx_data(self, query: str = None) -> Optional[Dict]:
-        """获取 JMX 数据"""
-        try:
-            url = self.jmx_url
-            if query:
-                url = f"{self.jmx_url}?qry={query}"
-            
-            response = self.session.get(url)
-            response.raise_for_status()
-            data = response.json()
-            
-            if 'beans' in data and data['beans']:
-                return data['beans']
-            return data
-            
-        except Exception as e:
-            logger.error(f"Failed to get JMX data from {url}: {e}")
-            return None
     
     def _get_metrics_data(self) -> Optional[Dict]:
         """获取 metrics 接口数据"""
@@ -65,32 +45,11 @@ class ImpalaExporter:
             return None
     
     def get_jvm_metrics(self) -> Optional[Dict]:
-        """获取 JVM 指标"""
-        # 尝试多种可能的 JVM 指标查询
-        jvm_queries = [
-            "java.lang:type=Memory",
-            "java.lang:type=MemoryPool,name=*",
-            "java.lang:type=GarbageCollector,name=*",
-            "java.lang:type=Runtime"
-        ]
-        
-        jvm_data = {}
-        for query in jvm_queries:
-            data = self._get_jmx_data(query)
-            if data:
-                if isinstance(data, list):
-                    for bean in data:
-                        jvm_data.update(bean)
-                else:
-                    jvm_data.update(data)
-        
-        # 如果 JMX 没有数据，尝试从 metrics 接口获取
-        if not jvm_data:
-            metrics_data = self._get_metrics_data()
-            if metrics_data:
-                jvm_data = self._extract_jvm_from_metrics(metrics_data)
-        
-        return jvm_data if jvm_data else None
+        """获取 JVM 指标 - 从 metrics 接口获取"""
+        metrics_data = self._get_metrics_data()
+        if metrics_data:
+            return self._extract_jvm_from_metrics(metrics_data)
+        return None
     
     def get_memory_metrics(self) -> Optional[Dict]:
         """获取内存指标"""

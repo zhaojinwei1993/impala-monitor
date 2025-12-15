@@ -27,8 +27,7 @@ def test_http_endpoints(host, port):
         f"http://{host}:{port}/metrics",
         f"http://{host}:{port}/metrics?json",
         f"http://{host}:{port}/queries",
-        f"http://{host}:{port}/queries?json",
-        f"http://{host}:{port}/jmx"
+        f"http://{host}:{port}/queries?json"
     ]
     
     results = {}

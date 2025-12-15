@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Impala Monitor
-Impala 监控收集器，基于 JMX 和 metrics 接口
+Impala 监控收集器，基于 metrics 和 queries 接口
 支持主机IP和主机名标签
 """
 
