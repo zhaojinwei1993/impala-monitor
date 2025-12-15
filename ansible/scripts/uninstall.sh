@@ -122,6 +122,7 @@ run_uninstall() {
     
     ansible-playbook \
         -i "$INVENTORY_DIR/inventory.ini" \
+        -u root \
         "$PLAYBOOK_DIR/uninstall-impala-monitor.yml" \
         $extra_vars \
         $tags \
@@ -176,6 +177,7 @@ EOF
 
     ansible-playbook \
         -i "$INVENTORY_DIR/inventory.ini" \
+        -u root \
         "/tmp/verify-uninstall.yml" \
         -v
     

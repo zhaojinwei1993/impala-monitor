@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Example:"
             echo "  $0 --hosts 'node1,node2,node3'"
-            echo "  $0 --hosts 'root@192.168.1.101,root@192.168.1.102' --force"
+            echo "  $0 --hosts '192.168.1.101,192.168.1.102' --force"
             exit 0
             ;;
         *)
@@ -136,7 +136,7 @@ failed_hosts=()
 for host in "${HOST_ARRAY[@]}"; do
     log_info "Uninstalling from $host..."
     
-    if scp "$TEMP_SCRIPT" "$host:/tmp/" && ssh "$host" "bash /tmp/impala-monitor-uninstall.sh && rm -f /tmp/impala-monitor-uninstall.sh"; then
+    if scp "$TEMP_SCRIPT" "root@$host:/tmp/" && ssh "root@$host" "bash /tmp/impala-monitor-uninstall.sh && rm -f /tmp/impala-monitor-uninstall.sh"; then
         log_info "✓ Successfully uninstalled from $host"
         ((success_count++))
     else

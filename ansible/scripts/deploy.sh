@@ -17,8 +17,8 @@ if [ ! -f "../inventory/inventory.ini" ]; then
 fi
 
 # 执行部署
-ansible-playbook -i ../inventory/inventory.ini ../playbooks/deploy-impala-monitor.yml
+ansible-playbook -i ../inventory/inventory.ini -u root ../playbooks/deploy-impala-monitor.yml
 
 echo "部署完成！"
 echo "可以通过以下命令检查服务状态："
-echo "ansible impala_nodes -i ../inventory/inventory.ini -m shell -a 'systemctl status impala-monitor'"
+echo "ansible impala_nodes -i ../inventory/inventory.ini -u root -m shell -a 'systemctl status impala-monitor'"
