@@ -7,6 +7,7 @@ Impala Metrics Exporter
 import json
 import requests
 import logging
+import socket
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
@@ -217,8 +218,22 @@ class ImpalaExporter:
     
     def test_connection(self) -> bool:
         """测试连接"""
+        # 直接测试metrics端点，这是我们实际需要的
         try:
-            response = self.session.get(f"http://{self.host}:{self.port}/")
-            return response.status_code == 200
-        except:
-            return False
+            response = self.session.get(self.metrics_url, timeout=10)
+            if response.status_code == 200:
+                logger.info(f"Successfully connected to Impala metrics endpoint")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to connect to metrics endpoint: {e}")
+        
+        # 如果metrics失败，测试queries端点
+        try:
+            response = self.session.get(self.queries_url, timeout=10)
+            if response.status_code == 200:
+                logger.info(f"Successfully connected to Impala queries endpoint")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to connect to queries endpoint: {e}")
+        
+        return False

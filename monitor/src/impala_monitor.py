@@ -291,10 +291,11 @@ class ImpalaMonitor:
                 self.admission_running.labels(pool=pool_name, **host_labels).set(value)
     
     def _extract_value(self, data: Dict, keys: list) -> Optional[float]:
-        """从数据中提取数值"""
+        """从数据中提取数值，支持模糊匹配"""
         if not data:
             return None
         
+        # 首先尝试精确匹配
         for key in keys:
             if key in data:
                 value = data[key]
@@ -302,6 +303,16 @@ class ImpalaMonitor:
                     return float(value)
                 elif isinstance(value, str):
                     return self._parse_value_string(value)
+        
+        # 如果精确匹配失败，尝试模糊匹配
+        for search_key in keys:
+            for actual_key, value in data.items():
+                if search_key.lower() in actual_key.lower():
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        return self._parse_value_string(value)
+        
         return None
     
     def _parse_value_string(self, value_str: str) -> Optional[float]:
