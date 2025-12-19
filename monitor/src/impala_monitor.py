@@ -107,6 +107,7 @@ class ImpalaMonitor:
         self.query_duration = Gauge('impala_query_duration_seconds', 'Query duration', query_labels)
         self.query_start_time = Gauge('impala_query_start_time', 'Query start timestamp', query_labels)
         self.query_end_time = Gauge('impala_query_end_time', 'Query end timestamp', query_labels)
+        self.query_info = Info('impala_query_info', 'Query statement information', query_labels)
         #
     def _get_host_labels(self) -> Dict[str, str]:
         """获取主机标签"""
@@ -232,6 +233,11 @@ class ImpalaMonitor:
                 end_timestamp = self._parse_time_string(end_time)
                 if end_timestamp:
                     self.query_end_time.labels(**query_labels).set(end_timestamp)
+            
+            # 查询语句
+            stmt = query.get('stmt', '')
+            if stmt:
+                self.query_info.labels(**query_labels).info({'statement': stmt[:1000]})  # 限制长度
     
     def _parse_memory_string(self, mem_str: str) -> Optional[float]:
         """解析内存字符串为字节数"""
