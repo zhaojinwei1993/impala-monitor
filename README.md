@@ -58,6 +58,7 @@ cd ansible/scripts && ./deploy.sh
 - `impala_query_duration_seconds` - 执行时间
 - `impala_query_start_time` - 开始时间戳
 - `impala_query_end_time` - 结束时间戳
+- `impala_query_info` - 查询语句信息（SQL语句）
 
 标签：`host_ip`, `hostname`, `query_id`, `effective_user`, `state`
 
