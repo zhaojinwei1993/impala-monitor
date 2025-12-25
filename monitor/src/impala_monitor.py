@@ -280,9 +280,9 @@ class ImpalaMonitor:
             else:
                 logger.debug(f"No start time data for query {query_id}")
             
-            # 结束时间 (如果存在)
+            # 结束时间 (只有非RUNNING状态才采集)
             end_time = query.get('end_time', '')
-            if end_time:
+            if end_time and state != 'RUNNING':
                 end_timestamp = self._parse_time_string(end_time)
                 if end_timestamp:
                     self.query_end_time.labels(**query_labels).set(end_timestamp)
@@ -290,7 +290,10 @@ class ImpalaMonitor:
                 else:
                     logger.warning(f"Failed to parse end time '{end_time}' for query {query_id}")
             else:
-                logger.debug(f"No end time data for query {query_id} (query may be running)")
+                if state == 'RUNNING':
+                    logger.debug(f"Skipped end time for RUNNING query {query_id}")
+                else:
+                    logger.debug(f"No end time data for query {query_id}")
             
             # 查询语句
             if stmt:
@@ -329,8 +332,19 @@ class ImpalaMonitor:
         if not duration_str:
             return None
         
-        # 格式如: "1h2m3s" 或 "2m30s" 或 "45s"
+        # 格式如: "1h2m3s" 或 "2m30s" 或 "45s" 或 "916.381ms"
         import re
+        
+        # 处理毫秒格式
+        ms_pattern = r'(\d+(?:\.\d+)?)ms'
+        ms_match = re.match(ms_pattern, duration_str.strip())
+        if ms_match:
+            ms_value = float(ms_match.group(1))
+            seconds = ms_value / 1000.0
+            # 如果小于1秒，按1秒计算
+            return max(seconds, 1.0)
+        
+        # 处理标准格式
         pattern = r'(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?'
         match = re.match(pattern, duration_str.strip())
         
@@ -338,7 +352,9 @@ class ImpalaMonitor:
             hours = int(match.group(1) or 0)
             minutes = int(match.group(2) or 0)
             seconds = float(match.group(3) or 0)
-            return hours * 3600 + minutes * 60 + seconds
+            total_seconds = hours * 3600 + minutes * 60 + seconds
+            # 如果小于1秒，按1秒计算
+            return max(total_seconds, 1.0) if total_seconds > 0 else None
         
         return None
     
