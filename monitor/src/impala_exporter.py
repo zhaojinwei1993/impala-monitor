@@ -84,7 +84,7 @@ class ImpalaExporter:
         }
     
     def get_query_details(self, queries_data):
-        """获取查询详细信息"""
+        """获取运行中查询详细信息"""
         query_details = []
         in_flight_queries = queries_data.get("in_flight_queries", [])
         
@@ -106,6 +106,26 @@ class ImpalaExporter:
             query_details.append(detail)
         
         return query_details
+    
+    def get_completed_queries(self, queries_data):
+        """获取已完成查询详细信息"""
+        completed_queries = []
+        completed_list = queries_data.get("completed_queries", [])
+        
+        for query in completed_list:
+            detail = {
+                "effective_user": query.get("effective_user", ""),
+                "stmt": query.get("stmt", ""),
+                "start_time": query.get("start_time", ""),
+                "end_time": query.get("end_time", ""),
+                "duration": query.get("duration", ""),
+                "state": query.get("state", ""),
+                "mem_usage": query.get("mem_usage", 0),
+                "query_id": query.get("query_id", "")
+            }
+            completed_queries.append(detail)
+        
+        return completed_queries
     
     def get_all_metrics(self) -> Dict[str, Any]:
         """获取所有指标"""
@@ -139,6 +159,7 @@ class ImpalaExporter:
                 "num_waiting_queries": queries_data.get("num_waiting_queries", 0)
             })
             result["query_details"] = self.get_query_details(queries_data)
+            result["completed_queries"] = self.get_completed_queries(queries_data)
         
         return result
     

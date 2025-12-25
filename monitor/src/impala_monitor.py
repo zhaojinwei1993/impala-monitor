@@ -16,7 +16,19 @@ from prometheus_client import start_http_server, Gauge, Counter, Info
 from impala_exporter import ImpalaExporter
 
 # 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import os
+log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'impala_monitor.log')
+
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()  # 同时输出到控制台
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
@@ -196,15 +208,41 @@ class ImpalaMonitor:
         self.queries_executing.labels(**host_labels).set(executing)
         self.queries_waiting.labels(**host_labels).set(waiting)
         
-        # 具体查询详情指标
+        # 处理运行中查询
         query_details = all_metrics.get('query_details', [])
-        for query in query_details:
+        self._process_query_list(query_details, host_labels, "in_flight")
+        
+        # 处理已完成查询
+        completed_queries = all_metrics.get('completed_queries', [])
+        self._process_query_list(completed_queries, host_labels, "completed")
+    
+    def _process_query_list(self, queries: list, host_labels: Dict[str, str], query_type: str):
+        """处理查询列表"""
+        logger.info(f"Processing {len(queries)} {query_type} queries")
+        
+        processed_count = 0
+        skipped_count = 0
+        
+        for query in queries:
+            # 过滤掉 GET_SCHEMAS 查询
+            stmt = query.get('stmt', '')
+            if stmt == 'GET_SCHEMAS':
+                skipped_count += 1
+                logger.debug(f"Skipped GET_SCHEMAS query: {query.get('query_id', 'unknown')}")
+                continue
+            
+            query_id = query.get('query_id', '')
+            effective_user = query.get('effective_user', '')
+            state = query.get('state', '')
+            
             query_labels = {
                 **host_labels,
-                'query_id': query.get('query_id', ''),
-                'effective_user': query.get('effective_user', ''),
-                'state': query.get('state', '')
+                'query_id': query_id,
+                'effective_user': effective_user,
+                'state': state
             }
+            
+            logger.debug(f"Processing {query_type} query {query_id} for user {effective_user}")
             
             # 内存使用 (转换为字节)
             mem_usage = query.get('mem_usage', 0)
@@ -212,6 +250,11 @@ class ImpalaMonitor:
                 mem_bytes = self._parse_memory_string(mem_usage)
                 if mem_bytes:
                     self.query_memory_usage.labels(**query_labels).set(mem_bytes)
+                    logger.debug(f"Set memory usage for {query_id}: {mem_bytes} bytes")
+                else:
+                    logger.warning(f"Failed to parse memory usage '{mem_usage}' for query {query_id}")
+            else:
+                logger.debug(f"No memory usage data for query {query_id}: {mem_usage}")
             
             # 执行时间 (转换为秒)
             duration = query.get('duration', '')
@@ -219,6 +262,11 @@ class ImpalaMonitor:
                 duration_seconds = self._parse_duration_string(duration)
                 if duration_seconds:
                     self.query_duration.labels(**query_labels).set(duration_seconds)
+                    logger.debug(f"Set duration for {query_id}: {duration_seconds} seconds")
+                else:
+                    logger.warning(f"Failed to parse duration '{duration}' for query {query_id}")
+            else:
+                logger.debug(f"No duration data for query {query_id}")
             
             # 开始时间 (转换为时间戳)
             start_time = query.get('start_time', '')
@@ -226,6 +274,11 @@ class ImpalaMonitor:
                 start_timestamp = self._parse_time_string(start_time)
                 if start_timestamp:
                     self.query_start_time.labels(**query_labels).set(start_timestamp)
+                    logger.debug(f"Set start time for {query_id}: {start_timestamp}")
+                else:
+                    logger.warning(f"Failed to parse start time '{start_time}' for query {query_id}")
+            else:
+                logger.debug(f"No start time data for query {query_id}")
             
             # 结束时间 (如果存在)
             end_time = query.get('end_time', '')
@@ -233,11 +286,22 @@ class ImpalaMonitor:
                 end_timestamp = self._parse_time_string(end_time)
                 if end_timestamp:
                     self.query_end_time.labels(**query_labels).set(end_timestamp)
+                    logger.debug(f"Set end time for {query_id}: {end_timestamp}")
+                else:
+                    logger.warning(f"Failed to parse end time '{end_time}' for query {query_id}")
+            else:
+                logger.debug(f"No end time data for query {query_id} (query may be running)")
             
             # 查询语句
-            stmt = query.get('stmt', '')
             if stmt:
                 self.query_info.labels(**query_labels).info({'statement': stmt[:1000]})  # 限制长度
+                logger.debug(f"Set query statement for {query_id}: {stmt[:100]}...")
+            else:
+                logger.debug(f"No statement data for query {query_id}")
+            
+            processed_count += 1
+        
+        logger.info(f"Processed {processed_count} {query_type} queries, skipped {skipped_count} GET_SCHEMAS queries")
     
     def _parse_memory_string(self, mem_str: str) -> Optional[float]:
         """解析内存字符串为字节数"""
