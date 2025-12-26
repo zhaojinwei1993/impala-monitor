@@ -113,13 +113,17 @@ class ImpalaMonitor:
         self.queries_executing = Gauge('impala_queries_executing', 'Number of executing queries', common_labels)
         self.queries_waiting = Gauge('impala_queries_waiting', 'Number of waiting queries', common_labels)
         
-        # 具体查询指标 - 带 query_id 标签
-        query_labels = common_labels + ['query_id', 'effective_user', 'state']
+        # 具体查询指标 - 只包含 query_id 和 effective_user 标签
+        query_labels = common_labels + ['query_id', 'effective_user']
         self.query_memory_usage = Gauge('impala_query_memory_usage_bytes', 'Query memory usage', query_labels)
         self.query_duration = Gauge('impala_query_duration_seconds', 'Query duration', query_labels)
         self.query_start_time = Gauge('impala_query_start_time', 'Query start timestamp', query_labels)
         self.query_end_time = Gauge('impala_query_end_time', 'Query end timestamp', query_labels)
         self.query_info = Info('impala_query_info', 'Query statement information', query_labels)
+        
+        # 查询状态指标 - 独立的状态指标
+        # 状态值: 0=CREATED, 1=INITIALIZED, 2=COMPILED, 3=RUNNING, 4=FINISHED, 5=EXCEPTION
+        self.query_state = Gauge('impala_query_state', 'Query state (0=CREATED, 1=INITIALIZED, 2=COMPILED, 3=RUNNING, 4=FINISHED, 5=EXCEPTION)', query_labels)
         #
     def _get_host_labels(self) -> Dict[str, str]:
         """获取主机标签"""
@@ -223,6 +227,16 @@ class ImpalaMonitor:
         processed_count = 0
         skipped_count = 0
         
+        # 状态映射
+        state_mapping = {
+            'CREATED': 0,
+            'INITIALIZED': 1,
+            'COMPILED': 2,
+            'RUNNING': 3,
+            'FINISHED': 4,
+            'EXCEPTION': 5
+        }
+        
         for query in queries:
             # 过滤掉 GET_SCHEMAS 查询
             stmt = query.get('stmt', '')
@@ -235,14 +249,22 @@ class ImpalaMonitor:
             effective_user = query.get('effective_user', '')
             state = query.get('state', '')
             
+            # 查询标签不包含 state
             query_labels = {
                 **host_labels,
                 'query_id': query_id,
-                'effective_user': effective_user,
-                'state': state
+                'effective_user': effective_user
             }
             
-            logger.debug(f"Processing {query_type} query {query_id} for user {effective_user}")
+            logger.debug(f"Processing {query_type} query {query_id} for user {effective_user}, state: {state}")
+            
+            # 设置查询状态指标
+            state_value = state_mapping.get(state, -1)
+            if state_value >= 0:
+                self.query_state.labels(**query_labels).set(state_value)
+                logger.debug(f"Set state for {query_id}: {state} ({state_value})")
+            else:
+                logger.warning(f"Unknown state '{state}' for query {query_id}")
             
             # 内存使用 (转换为字节)
             mem_usage = query.get('mem_usage', 0)
