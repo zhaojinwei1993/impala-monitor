@@ -1,0 +1,36 @@
+---
+- name: Uninstall Impala Query Killer from all nodes
+  hosts: impala_nodes
+  become: yes
+  vars:
+    service_name: "impala-query-killer"
+    install_dir: "/opt/impala-monitor"
+  
+  tasks:
+    - name: Stop and disable service
+      systemd:
+        name: "{{ service_name }}"
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+    
+    - name: Remove systemd service file
+      file:
+        path: "/etc/systemd/system/{{ service_name }}.service"
+        state: absent
+      notify: Reload systemd
+    
+    - name: Remove query killer script
+      file:
+        path: "{{ install_dir }}/src/query_killer.py"
+        state: absent
+    
+    - name: Remove query killer logs
+      file:
+        path: "{{ install_dir }}/logs/query_killer.log"
+        state: absent
+  
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes

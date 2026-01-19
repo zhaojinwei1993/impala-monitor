@@ -1,0 +1,54 @@
+---
+- name: Deploy Impala Query Killer to all nodes
+  hosts: impala_nodes
+  become: yes
+  vars:
+    install_dir: "/opt/impala-monitor"
+    service_name: "impala-query-killer"
+    impala_port: 25000
+    check_interval: 60
+    max_duration: 600
+    max_memory_gb: 1024
+    # 必须通过 -e 参数传入
+    # feishu_webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+  
+  tasks:
+    - name: Check if feishu_webhook is provided
+      fail:
+        msg: "feishu_webhook is required. Use: -e feishu_webhook=YOUR_WEBHOOK_URL"
+      when: feishu_webhook is not defined or feishu_webhook == ""
+    
+    - name: Check if impala-monitor is installed
+      stat:
+        path: "{{ install_dir }}/src/impala_exporter.py"
+      register: monitor_installed
+    
+    - name: Fail if impala-monitor not installed
+      fail:
+        msg: "impala-monitor must be installed first. Please run deploy.yml first."
+      when: not monitor_installed.stat.exists
+    
+    - name: Copy query killer script
+      copy:
+        src: "../monitor/src/query_killer.py"
+        dest: "{{ install_dir }}/src/query_killer.py"
+        mode: '0755'
+    
+    - name: Create systemd service file
+      template:
+        src: "../templates/query_killer.service.j2"
+        dest: "/etc/systemd/system/{{ service_name }}.service"
+        mode: '0644'
+      notify: Reload systemd
+    
+    - name: Enable and start service
+      systemd:
+        name: "{{ service_name }}"
+        enabled: yes
+        state: started
+        daemon_reload: yes
+  
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes

@@ -10,6 +10,7 @@ Apache Impala 集群监控解决方案，提供节点级别的指标采集和 Gr
 - 🚀 **自动部署**：Ansible 一键部署
 - 🏷️ **主机标签**：支持主机IP和主机名标签，便于多节点管理
 - 📋 **查询详情**：采集每个查询的详细信息（用户、内存、执行时间等）
+- 🛡️ **查询保护**：自动终止超时或超内存查询，保护集群稳定性
 
 ## 快速开始
 
@@ -69,6 +70,20 @@ cd ansible/scripts && ./deploy.sh
 - 按主机分组的图表
 - 查询详情表格：显示正在执行的查询信息
 - 内存和 JVM 趋势图
+
+## 查询保护（Query Killer）
+
+自动监控并终止超时或超内存的查询，保护集群稳定性。
+
+### 快速部署
+```bash
+export IMPALA_HOST="your-impala-host"
+export FEISHU_WEBHOOK="https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id"
+cd monitor/scripts
+sudo -E ./deploy_query_killer.sh install
+```
+
+详细说明请查看 [QUERY_KILLER.md](QUERY_KILLER.md)
 
 ## 卸载
 

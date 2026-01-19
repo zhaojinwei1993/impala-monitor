@@ -1,0 +1,35 @@
+groups:
+  - name: impala_alerts
+    rules:
+      # 节点内存使用率超过80%告警
+      - alert: ImpalaNodeMemoryUsageHigh
+        expr: (impala_memory_rss / impala_mem_tracker_process_limit) * 100 > 80
+        for: 2m
+        labels:
+          severity: warning
+          service: impala
+        annotations:
+          summary: "Impala节点内存使用率过高"
+          description: "主机名：{{ $labels.hostname }} IP地址：{{ $labels.host_ip }} 内存使用率超过{{ $value | humanize }}%"
+
+      # JVM堆内存使用率超过80%告警
+      - alert: ImpalaJVMHeapUsageHigh
+        expr: (impala_jvm_heap_current_bytes / impala_jvm_heap_committed_bytes) * 100 > 80
+        for: 2m
+        labels:
+          severity: warning
+          service: impala
+        annotations:
+          summary: "Impala JVM堆内存使用率过高"
+          description: "主机名：{{ $labels.hostname }} IP地址：{{ $labels.host_ip }} JVM堆内存使用率超过{{ $value | humanize }}%"
+
+      # 查询执行时间超过5分钟告警 - 只对运行中的查询告警
+      - alert: ImpalaQueryExecutionTimeHigh
+        expr: impala_query_duration_seconds{state="RUNNING"} > 300
+        for: 0m
+        labels:
+          severity: critical
+          service: impala
+        annotations:
+          summary: "Impala查询执行时间过长"
+          description: "执行人：{{ $labels.effective_user }} 查询ID：{{ $labels.query_id }} 执行节点：{{ $labels.hostname }}({{ $labels.host_ip }}) 执行时间：{{ $value | humanizeDuration }}秒 查询语句：{{ $labels.statement }} 查看详情：https://db-granfana.tigerbrokers.net/d/OlIStn7Dz/impala-queries?orgId=1&var-query_id={{ $labels.query_id }}"

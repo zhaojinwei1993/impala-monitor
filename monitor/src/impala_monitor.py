@@ -113,18 +113,21 @@ class ImpalaMonitor:
         self.queries_executing = Gauge('impala_queries_executing', 'Number of executing queries', common_labels)
         self.queries_waiting = Gauge('impala_queries_waiting', 'Number of waiting queries', common_labels)
         
-        # 具体查询指标 - 只包含 query_id 和 effective_user 标签
-        query_labels = common_labels + ['query_id', 'effective_user']
+        # 具体查询指标 - 包含 state 标签便于过滤
+        query_labels = common_labels + ['query_id', 'effective_user', 'state']
         self.query_memory_usage = Gauge('impala_query_memory_usage_bytes', 'Query memory usage', query_labels)
         self.query_duration = Gauge('impala_query_duration_seconds', 'Query duration', query_labels)
         self.query_start_time = Gauge('impala_query_start_time', 'Query start timestamp', query_labels)
         self.query_end_time = Gauge('impala_query_end_time', 'Query end timestamp', query_labels)
-        self.query_info = Info('impala_query_info', 'Query statement information', query_labels)
         
-        # 查询状态指标 - 独立的状态指标
-        # 状态值: 0=CREATED, 1=INITIALIZED, 2=COMPILED, 3=RUNNING, 4=FINISHED, 5=EXCEPTION
-        self.query_state = Gauge('impala_query_state', 'Query state (0=CREATED, 1=INITIALIZED, 2=COMPILED, 3=RUNNING, 4=FINISHED, 5=EXCEPTION)', query_labels)
-        #
+        # 查询语句指标 - 使用 Gauge 而不是 Info，便于告警规则使用
+        query_stmt_labels = common_labels + ['query_id', 'effective_user', 'state', 'statement']
+        self.query_statement = Gauge('impala_query_statement', 'Query statement (1=active, 0=inactive)', query_stmt_labels)
+        
+        # 用于清理已完成查询的集合
+        self.active_queries = set()
+        # 存储查询标签信息，用于清理
+        self.query_labels_cache = {}
     def _get_host_labels(self) -> Dict[str, str]:
         """获取主机标签"""
         return {
@@ -214,28 +217,18 @@ class ImpalaMonitor:
         
         # 处理运行中查询
         query_details = all_metrics.get('query_details', [])
-        self._process_query_list(query_details, host_labels, "in_flight")
+        current_queries = self._process_query_list(query_details, host_labels)
         
-        # 处理已完成查询
-        completed_queries = all_metrics.get('completed_queries', [])
-        self._process_query_list(completed_queries, host_labels, "completed")
+        # 清理已完成的查询指标
+        self._cleanup_finished_queries(current_queries, host_labels)
     
-    def _process_query_list(self, queries: list, host_labels: Dict[str, str], query_type: str):
-        """处理查询列表"""
-        logger.info(f"Processing {len(queries)} {query_type} queries")
+    def _process_query_list(self, queries: list, host_labels: Dict[str, str]) -> set:
+        """处理查询列表，返回当前活跃查询ID集合"""
+        logger.info(f"Processing {len(queries)} queries")
         
         processed_count = 0
         skipped_count = 0
-        
-        # 状态映射
-        state_mapping = {
-            'CREATED': 0,
-            'INITIALIZED': 1,
-            'COMPILED': 2,
-            'RUNNING': 3,
-            'FINISHED': 4,
-            'EXCEPTION': 5
-        }
+        current_queries = set()
         
         for query in queries:
             # 过滤掉 GET_SCHEMAS 查询
@@ -249,22 +242,25 @@ class ImpalaMonitor:
             effective_user = query.get('effective_user', '')
             state = query.get('state', '')
             
-            # 查询标签不包含 state
+            # 只处理运行中的查询
+            if state != 'RUNNING':
+                logger.debug(f"Skipped non-running query {query_id} with state: {state}")
+                continue
+                
+            current_queries.add(query_id)
+            
+            # 查询标签包含 state
             query_labels = {
                 **host_labels,
                 'query_id': query_id,
-                'effective_user': effective_user
+                'effective_user': effective_user,
+                'state': state
             }
             
-            logger.debug(f"Processing {query_type} query {query_id} for user {effective_user}, state: {state}")
+            # 缓存查询标签信息，用于后续清理
+            self.query_labels_cache[query_id] = query_labels.copy()
             
-            # 设置查询状态指标
-            state_value = state_mapping.get(state, -1)
-            if state_value >= 0:
-                self.query_state.labels(**query_labels).set(state_value)
-                logger.debug(f"Set state for {query_id}: {state} ({state_value})")
-            else:
-                logger.warning(f"Unknown state '{state}' for query {query_id}")
+            logger.debug(f"Processing running query {query_id} for user {effective_user}")
             
             # 内存使用 (转换为字节)
             mem_usage = query.get('mem_usage', 0)
@@ -273,10 +269,6 @@ class ImpalaMonitor:
                 if mem_bytes:
                     self.query_memory_usage.labels(**query_labels).set(mem_bytes)
                     logger.debug(f"Set memory usage for {query_id}: {mem_bytes} bytes")
-                else:
-                    logger.warning(f"Failed to parse memory usage '{mem_usage}' for query {query_id}")
-            else:
-                logger.debug(f"No memory usage data for query {query_id}: {mem_usage}")
             
             # 执行时间 (转换为秒)
             duration = query.get('duration', '')
@@ -285,10 +277,6 @@ class ImpalaMonitor:
                 if duration_seconds:
                     self.query_duration.labels(**query_labels).set(duration_seconds)
                     logger.debug(f"Set duration for {query_id}: {duration_seconds} seconds")
-                else:
-                    logger.warning(f"Failed to parse duration '{duration}' for query {query_id}")
-            else:
-                logger.debug(f"No duration data for query {query_id}")
             
             # 开始时间 (转换为时间戳)
             start_time = query.get('start_time', '')
@@ -296,37 +284,82 @@ class ImpalaMonitor:
                 start_timestamp = self._parse_time_string(start_time)
                 if start_timestamp:
                     self.query_start_time.labels(**query_labels).set(start_timestamp)
-                    logger.debug(f"Set start time for {query_id}: {start_timestamp}")
-                else:
-                    logger.warning(f"Failed to parse start time '{start_time}' for query {query_id}")
-            else:
-                logger.debug(f"No start time data for query {query_id}")
             
-            # 结束时间 (只有非RUNNING状态才采集)
-            end_time = query.get('end_time', '')
-            if end_time and state != 'RUNNING':
-                end_timestamp = self._parse_time_string(end_time)
-                if end_timestamp:
-                    self.query_end_time.labels(**query_labels).set(end_timestamp)
-                    logger.debug(f"Set end time for {query_id}: {end_timestamp}")
-                else:
-                    logger.warning(f"Failed to parse end time '{end_time}' for query {query_id}")
-            else:
-                if state == 'RUNNING':
-                    logger.debug(f"Skipped end time for RUNNING query {query_id}")
-                else:
-                    logger.debug(f"No end time data for query {query_id}")
-            
-            # 查询语句
+            # 查询语句 - 使用 Gauge 指标，便于告警规则使用
             if stmt:
-                self.query_info.labels(**query_labels).info({'statement': stmt[:1000]})  # 限制长度
-                logger.debug(f"Set query statement for {query_id}: {stmt[:100]}...")
-            else:
-                logger.debug(f"No statement data for query {query_id}")
+                # 截取查询语句前500个字符作为标签
+                stmt_short = stmt[:500].replace('\n', ' ').replace('\r', ' ')
+                stmt_labels = {
+                    **query_labels,
+                    'statement': stmt_short
+                }
+                self.query_statement.labels(**stmt_labels).set(1)
+                # 也缓存语句标签
+                self.query_labels_cache[f"{query_id}_stmt"] = stmt_labels.copy()
+                logger.debug(f"Set query statement for {query_id}: {stmt_short}")
             
             processed_count += 1
         
-        logger.info(f"Processed {processed_count} {query_type} queries, skipped {skipped_count} GET_SCHEMAS queries")
+        logger.info(f"Processed {processed_count} running queries, skipped {skipped_count} GET_SCHEMAS queries")
+        return current_queries
+    
+    def _cleanup_finished_queries(self, current_queries: set, host_labels: Dict[str, str]):
+        """清理已完成查询的指标"""
+        # 找出已完成的查询
+        finished_queries = self.active_queries - current_queries
+        
+        if finished_queries:
+            logger.info(f"Cleaning up {len(finished_queries)} finished queries")
+            
+            # 清理已完成查询的指标
+            for query_id in finished_queries:
+                try:
+                    # 获取缓存的查询标签
+                    if query_id in self.query_labels_cache:
+                        query_labels = self.query_labels_cache[query_id]
+                        
+                        # 提取标签值（按照定义时的顺序）
+                        # query_labels = common_labels + ['query_id', 'effective_user', 'state']
+                        label_values = (
+                            query_labels['host_ip'],
+                            query_labels['hostname'], 
+                            query_labels['query_id'],
+                            query_labels['effective_user'],
+                            query_labels['state']
+                        )
+                        
+                        # 删除查询相关的指标
+                        self.query_memory_usage.remove(*label_values)
+                        self.query_duration.remove(*label_values)
+                        self.query_start_time.remove(*label_values)
+                        self.query_end_time.remove(*label_values)
+                        
+                        # 删除查询语句指标
+                        stmt_key = f"{query_id}_stmt"
+                        if stmt_key in self.query_labels_cache:
+                            stmt_labels = self.query_labels_cache[stmt_key]
+                            # query_stmt_labels = common_labels + ['query_id', 'effective_user', 'state', 'statement']
+                            stmt_label_values = (
+                                stmt_labels['host_ip'],
+                                stmt_labels['hostname'],
+                                stmt_labels['query_id'],
+                                stmt_labels['effective_user'],
+                                stmt_labels['state'],
+                                stmt_labels['statement']
+                            )
+                            self.query_statement.remove(*stmt_label_values)
+                            del self.query_labels_cache[stmt_key]
+                        
+                        # 删除缓存
+                        del self.query_labels_cache[query_id]
+                        
+                        logger.debug(f"Cleaned up metrics for finished query {query_id}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup query {query_id}: {e}")
+        
+        # 更新活跃查询集合
+        self.active_queries = current_queries
     
     def _parse_memory_string(self, mem_str: str) -> Optional[float]:
         """解析内存字符串为字节数"""
