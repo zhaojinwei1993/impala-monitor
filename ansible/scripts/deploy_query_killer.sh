@@ -33,6 +33,7 @@ cd "$ANSIBLE_DIR"
 
 ansible-playbook \
     -i inventory/inventory.ini \
+    -u root \
     deploy_query_killer.yml \
     -e "feishu_webhook=$FEISHU_WEBHOOK" \
     -e "max_duration=$MAX_DURATION" \
