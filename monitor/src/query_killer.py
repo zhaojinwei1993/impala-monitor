@@ -194,6 +194,11 @@ class QueryKiller:
                 # 跳过 GET_SCHEMAS
                 if query.get('stmt') == 'GET_SCHEMAS':
                     continue
+
+                # 跳过 root 用户的查询
+                if query.get('effective_user') == 'root':
+                    continue
+
                 
                 query_id = query.get('query_id', '')
                 mem_usage = self._parse_memory_string(query.get('mem_usage', '0'))
