@@ -6,13 +6,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory={{ install_dir }}/src
-ExecStart=/usr/bin/python3 {{ install_dir }}/src/query_killer.py \
-    --host {{ ansible_default_ipv4.address }} \
-    --port {{ impala_port }} \
-    --feishu-webhook "{{ feishu_webhook }}" \
-    --check-interval {{ check_interval }} \
-    --max-duration {{ max_duration }} \
-    --max-memory-gb {{ max_memory_gb }}
+ExecStart=/usr/bin/python3 {{ install_dir }}/src/query_killer.py --config {{ install_dir }}/config/query_killer.conf
 Restart=always
 RestartSec=10
 StandardOutput=append:{{ install_dir }}/logs/query_killer.log

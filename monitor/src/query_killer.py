@@ -4,6 +4,7 @@ Impala Query Killer
 监控并自动 kill 超时或超内存的查询
 """
 
+import os
 import time
 import logging
 import argparse
@@ -17,6 +18,19 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def load_config(config_file: str) -> Dict[str, str]:
+    """加载配置文件"""
+    config = {}
+    if os.path.exists(config_file):
+        with open(config_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    config[key.strip()] = value.strip()
+    return config
 
 
 class QueryKiller:
@@ -87,13 +101,39 @@ class QueryKiller:
             else:
                 logger.error(f"Failed to kill query {query_id}: {response.status_code}, response: {response.text}")
                 return False
-        except requests.exceptions.Timeout:
-            # 超时也可能意味着 cancel 已经发送，查询可能正在终止
-            logger.warning(f"Cancel request timeout for query {query_id}, but query may still be cancelled")
-            return True
         except Exception as e:
-            logger.error(f"Error killing query {query_id}: {e}")
+            # 检查是否是超时错误（包括 ReadTimeout）
+            error_msg = str(e)
+            if 'timed out' in error_msg.lower() or 'timeout' in error_msg.lower():
+                # 超时时，等待几秒后验证查询是否还存在
+                logger.warning(f"Cancel request timeout for query {query_id}: {e}")
+                logger.info(f"Waiting 5 seconds to verify if query was killed...")
+                time.sleep(5)
+                
+                # 检查查询是否还在运行
+                if self._is_query_running(query_id):
+                    logger.error(f"Query {query_id} is still running after cancel timeout")
+                    return False
+                else:
+                    logger.info(f"Query {query_id} is no longer running, cancel was successful")
+                    return True
+            else:
+                logger.error(f"Error killing query {query_id}: {e}")
+                return False
+    
+    def _is_query_running(self, query_id: str) -> bool:
+        """检查查询是否还在运行"""
+        try:
+            all_metrics = self.exporter.get_all_metrics()
+            queries = all_metrics.get('query_details', [])
+            for query in queries:
+                if query.get('query_id') == query_id and query.get('state') == 'RUNNING':
+                    return True
             return False
+        except Exception as e:
+            logger.error(f"Error checking query status: {e}")
+            # 出错时保守处理，假设查询还在运行
+            return True
     
     def _send_feishu_notification(self, query: Dict[str, Any], reason: str):
         """发送飞书通知"""
@@ -115,7 +155,7 @@ class QueryKiller:
             f"运行时长：{duration_min:.1f} 分钟\n"
             f"查询内存：{mem_gb:.2f} GB\n"
             f"终止原因：{reason}\n\n"
-            f"该 SQL 运行时间/占用内存过大影响到集群稳定性，请优化代码或者使用 hive on spark 进行查询。"
+            f"该 SQL 运行时间/占用内存过大影响到集群稳定性，请优化 SQL 或者使用 hive on spark 进行查询。"
         )
         
         payload = {
@@ -201,25 +241,42 @@ class QueryKiller:
 
 def main():
     parser = argparse.ArgumentParser(description='Impala Query Killer')
-    parser.add_argument('--host', required=True, help='Impala host')
-    parser.add_argument('--port', type=int, default=25000, help='Impala port')
-    parser.add_argument('--feishu-webhook', help='Feishu webhook URL')
-    parser.add_argument('--check-interval', type=int, default=60, help='Check interval in seconds')
-    parser.add_argument('--max-duration', type=int, default=600, help='Max duration in seconds')
-    parser.add_argument('--max-memory-gb', type=int, default=1024, help='Max memory in GB')
+    parser.add_argument('--config', default='/opt/impala-monitor/config/query_killer.conf', 
+                        help='Config file path')
+    parser.add_argument('--host', help='Impala host (overrides config)')
+    parser.add_argument('--port', type=int, help='Impala port (overrides config)')
+    parser.add_argument('--feishu-webhook', help='Feishu webhook URL (overrides config)')
+    parser.add_argument('--check-interval', type=int, help='Check interval in seconds (overrides config)')
+    parser.add_argument('--max-duration', type=int, help='Max duration in seconds (overrides config)')
+    parser.add_argument('--max-memory-gb', type=int, help='Max memory in GB (overrides config)')
     
     args = parser.parse_args()
     
+    # 加载配置文件
+    config = load_config(args.config)
+    
+    # 命令行参数优先，否则使用配置文件
+    impala_host = args.host or config.get('IMPALA_HOST')
+    impala_port = args.port or int(config.get('IMPALA_PORT', 25000))
+    feishu_webhook = args.feishu_webhook or config.get('FEISHU_WEBHOOK')
+    check_interval = args.check_interval or int(config.get('CHECK_INTERVAL', 60))
+    max_duration = args.max_duration or int(config.get('MAX_DURATION', 600))
+    max_memory_gb = args.max_memory_gb or int(config.get('MAX_MEMORY_GB', 1024))
+    
+    if not impala_host:
+        logger.error("IMPALA_HOST is required in config file or --host argument")
+        return
+    
     killer = QueryKiller(
-        impala_host=args.host,
-        impala_port=args.port,
-        feishu_webhook=args.feishu_webhook,
-        check_interval=args.check_interval
+        impala_host=impala_host,
+        impala_port=impala_port,
+        feishu_webhook=feishu_webhook,
+        check_interval=check_interval
     )
     
     # 设置阈值
-    killer.max_duration_seconds = args.max_duration
-    killer.max_memory_bytes = args.max_memory_gb * (1024**3)
+    killer.max_duration_seconds = max_duration
+    killer.max_memory_bytes = max_memory_gb * (1024**3)
     
     killer.run()
 

@@ -28,11 +28,23 @@
         msg: "impala-monitor must be installed first. Please run deploy.yml first."
       when: not monitor_installed.stat.exists
     
+    - name: Create config directory
+      file:
+        path: "{{ install_dir }}/config"
+        state: directory
+        mode: '0755'
+    
     - name: Copy query killer script
       copy:
         src: "../monitor/src/query_killer.py"
         dest: "{{ install_dir }}/src/query_killer.py"
         mode: '0755'
+    
+    - name: Generate config file
+      template:
+        src: "../templates/query_killer.conf.j2"
+        dest: "{{ install_dir }}/config/query_killer.conf"
+        mode: '0644'
     
     - name: Create systemd service file
       template:

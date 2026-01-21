@@ -1,0 +1,15 @@
+# Impala Query Killer 配置文件
+
+# Impala 连接配置
+IMPALA_HOST={{ ansible_default_ipv4.address }}
+IMPALA_PORT={{ impala_port }}
+
+# 飞书通知配置
+FEISHU_WEBHOOK={{ feishu_webhook }}
+
+# 检查间隔（秒）
+CHECK_INTERVAL={{ check_interval }}
+
+# 查询阈值配置
+MAX_DURATION={{ max_duration }}
+MAX_MEMORY_GB={{ max_memory_gb }}
